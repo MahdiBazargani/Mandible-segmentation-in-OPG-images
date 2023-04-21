@@ -106,6 +106,7 @@ def validate(model, device, val_loader, criterion):
     return val_loss, total_dice
 
 
+
 # define the function to plot the train and validation loss
 def plot_loss(train_loss, val_loss):
     plt.plot(train_loss, label='Train loss')
