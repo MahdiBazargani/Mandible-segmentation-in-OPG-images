@@ -19,8 +19,8 @@ parser.add_argument('--model', type=str, default='unet', help='Model')
 parser.add_argument('--epochs', type=int, default=2, help='Number of epochs')
 parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
 parser.add_argument('--learning_rate', type=float, default=0.00001, help='Learning rate')
-parser.add_argument('--path_to_images',type=str,default='dataset/train/Images',help='path to dataset')
-parser.add_argument('--path_to_masks',type=str,default='dataset/train/Segmentation1',help='path to dataset')
+parser.add_argument('--path_to_images',type=str,default='dataset/train/Images',help='path to images')
+parser.add_argument('--path_to_masks',type=str,default='dataset/train/Segmentation1',help='path to masks')
 
 args = parser.parse_args()
 
