@@ -12,15 +12,18 @@ from models.unet import UNet
 from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
 
+from models.SegFormer import Segformer
+
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', type=str, default='unet', help='Model')
-parser.add_argument('--epochs', type=int, default=2, help='Number of epochs')
-parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
-parser.add_argument('--learning_rate', type=float, default=0.00001, help='Learning rate')
-parser.add_argument('--path_to_images',type=str,default='dataset/train/Images',help='path to images')
-parser.add_argument('--path_to_masks',type=str,default='dataset/train/Segmentation1',help='path to masks')
+parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer, etc.')
+parser.add_argument('--epochs',metavar='', type=int, default=100, help='Number of epochs')
+parser.add_argument('--batch_size',metavar='', type=int, default=1, help='Batch size')
+parser.add_argument('--learning_rate',metavar='', type=float, default=1e-5, help='Learning rate')
+parser.add_argument('--path_to_images',metavar='',type=str,default='dataset/train/Images',help='path to images')
+parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/train/Segmentation1',help='path to masks')
+parser.add_argument('--scale',metavar='', type=float, default=0.3, help='Downscaling factor of the images')
 
 args = parser.parse_args()
 
@@ -33,16 +36,26 @@ class MandibleDataset(Dataset):
         self.transform = transform
         self.images = []
         self.masks = []
+        
         for filename in os.listdir(self.path_to_images):
             img = cv2.imread(os.path.join(self.path_to_images, filename), 0)
-            img = cv2.resize(img, (1000, 400))
-            img = img.astype(np.float32) / 255.0
+            if args.model=='SegFormer':
+                img=cv2.resize(img , (1024, 512))
+            else:
+                img=cv2.resize(img , ( int(img.shape[1]*args.scale),int(img.shape[0]*args.scale) ))
+            img-=img.min()
+            img = img.astype(np.float32) / img.max()
             self.images.append(img)
-
+        i=-1
         for filename in os.listdir(self.path_to_masks):
+            i+=1
             masks = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
-            masks = cv2.resize(masks, (1000, 400))
-            masks = masks.astype(np.float32) / 255.0
+            if args.model=='SegFormer':
+                masks=cv2.resize(masks , (256, 128))
+            else:            
+                masks=cv2.resize(masks , ( self.images[i].shape[1],self.images[i].shape[0] ))
+            masks-=masks.min()
+            masks = masks.astype(np.float32) / masks.max()
             masks=np.where(masks==np.unique(masks)[0],0,1)
             self.masks.append(masks)
 
@@ -80,6 +93,7 @@ def train(model, device, train_loader, optimizer, criterion):
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
+        loss+=Dice(output[:,1,:,:], target)
         train_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -99,6 +113,7 @@ def validate(model, device, val_loader, criterion):
             target=target.squeeze(1).long()
             output = model(data)
             loss = criterion(output, target)
+            loss+=Dice(output[:,1,:,:], target)
             val_loss += loss.item()
             total_dice += Dice(output[:,0,:,:], target).item()
     val_loss /= len(val_loader)
@@ -132,9 +147,8 @@ def plot_dice(train_dice, val_dice):
 
 def train_model(model,epochs,batch_size,learning_rate,device):
 
-    # define the data transforms
     transform = transforms.Compose([
-        transforms.ToTensor()
+        transforms.ToTensor(),
     ])
 
     criterion =  nn.CrossEntropyLoss() 
@@ -151,8 +165,6 @@ def train_model(model,epochs,batch_size,learning_rate,device):
 
     train_loader = DataLoader(train_set,batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True)
-
-
 
     # define the lists to store the train and validation loss and dice score
     train_loss_list = []
@@ -187,6 +199,9 @@ if __name__ == '__main__':
     
     if args.model=='unet':
         model = UNet(n_channels=1, n_classes=2, bilinear=False)
+    if args.model=='SegFormer':
+        model=Segformer(channels=1,num_classes=2)
+
     model = model.to(memory_format=torch.channels_last)
     model.to(device=device)
 
