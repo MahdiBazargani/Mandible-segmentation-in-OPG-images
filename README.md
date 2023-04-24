@@ -1,4 +1,4 @@
-# Mandible-segmentation-in-OPG-images
+# Mandible segmentation in OPG images
 
 Mandible segmentation in OPG (Orthopantomography) images is the process of identifying and delineating the mandible bone from the surrounding tissues and structures in an OPG image.
 In this project, neural network-based models are used for mandibular segmentation. The models reviewed include Unet, SegFormer and Unet++.
