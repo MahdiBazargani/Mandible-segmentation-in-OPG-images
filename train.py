@@ -17,7 +17,7 @@ from models.unetplusplus.unetplusplus import NestedUNet
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer, etc.')
+parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer and unet++')
 parser.add_argument('--epochs',metavar='', type=int, default=100, help='Number of epochs')
 parser.add_argument('--batch_size',metavar='', type=int, default=1, help='Batch size')
 parser.add_argument('--learning_rate',metavar='', type=float, default=1e-5, help='Learning rate')

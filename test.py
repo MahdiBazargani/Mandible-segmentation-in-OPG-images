@@ -16,7 +16,7 @@ from models.unetplusplus.unetplusplus import NestedUNet
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer, etc.')
+parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer and unet++')
 parser.add_argument('--checkpoint', metavar='',type=str,default='checkpoints/unet_model_best.pth',help='path to model')
 parser.add_argument('--path_to_images',metavar='',type=str,default='dataset/test/Images',help='path to images')
 parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/test/Segmentation1',help='path to masks')
