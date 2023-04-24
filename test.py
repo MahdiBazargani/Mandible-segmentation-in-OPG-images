@@ -12,13 +12,14 @@ from models.unet import UNet
 from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
 from models.SegFormer import Segformer
+from models.unetplusplus.unetplusplus import NestedUNet
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer, etc.')
 parser.add_argument('--checkpoint', metavar='',type=str,default='checkpoints/unet_model_best.pth',help='path to model')
-parser.add_argument('--path_to_images',metavar='',type=str,default='dataset/train/Images',help='path to images')
-parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/train/Segmentation1',help='path to masks')
+parser.add_argument('--path_to_images',metavar='',type=str,default='dataset/test/Images',help='path to images')
+parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/test/Segmentation1',help='path to masks')
 parser.add_argument('--output_dir',metavar='',type=str,default='dataset/test/outputs',help='path to output directory')
 parser.add_argument('--scale',metavar='', type=float, default=0.3, help='Downscaling factor of the images')
 
@@ -42,10 +43,13 @@ class MandibleDataset(Dataset):
             self.main_images.append(img)
             self.sizes.append(img.shape)
 
-            if args.model=='SegFormer':
+            if args.model=='unet':
+                img=cv2.resize(img , ( int(img.shape[1]*args.scale),int(img.shape[0]*args.scale) ))
+            elif args.model=='SegFormer':
                 img=cv2.resize(img , (1024, 512))
             else:
-                img=cv2.resize(img , ( int(img.shape[1]*args.scale),int(img.shape[0]*args.scale) ))
+                img=cv2.resize(img , (512, 512))
+
             img-=img.min()
             img = img.astype(np.float32) / img.max()            
             self.images.append(img)
@@ -56,10 +60,12 @@ class MandibleDataset(Dataset):
             i+=1
 
             masks = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
-            if args.model=='SegFormer':
-                masks=cv2.resize(masks , (256, 128))
-            else:            
+            if args.model=='unet':
                 masks=cv2.resize(masks , ( self.images[i].shape[1],self.images[i].shape[0] ))
+            elif args.model=='SegFormer':
+                masks=cv2.resize(masks , (256, 128))
+            else:     
+                masks=cv2.resize(masks , (512, 512))
             masks-=masks.min()
             masks = masks.astype(np.float32) / masks.max()
             masks=np.where(masks==np.unique(masks)[0],0,1)
@@ -145,7 +151,8 @@ if __name__ == '__main__':
         model = UNet(n_channels=1, n_classes=2, bilinear=False)
     if args.model=='SegFormer':
         model=Segformer(channels=1,num_classes=2)
-
+    if args.model=='unet++':
+        model=NestedUNet(1,2)
     model = model.to(memory_format=torch.channels_last)
 
     state_dict = torch.load(args.checkpoint, map_location=device)
