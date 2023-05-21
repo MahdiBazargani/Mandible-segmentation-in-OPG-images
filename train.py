@@ -8,16 +8,14 @@ import cv2
 import os
 from torchvision.transforms import transforms
 from tqdm import tqdm
-from models.unet import UNet
 from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
-
-from models.SegFormer import Segformer
-from models.unetplusplus.unetplusplus import NestedUNet
-
+import segmentation_models_pytorch as smp
+from segmentation_models_pytorch.encoders import get_preprocessing_fn
+from segmentation_models_pytorch.losses import DiceLoss
 parser = argparse.ArgumentParser()
 
-parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer and unet++')
+parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, unet++ and FPN')
 parser.add_argument('--epochs',metavar='', type=int, default=100, help='Number of epochs')
 parser.add_argument('--batch_size',metavar='', type=int, default=1, help='Batch size')
 parser.add_argument('--learning_rate',metavar='', type=float, default=1e-5, help='Learning rate')
@@ -26,7 +24,13 @@ parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/train
 parser.add_argument('--scale',metavar='', type=float, default=0.3, help='Downscaling factor of the images')
 
 args = parser.parse_args()
+preprocess_input = get_preprocessing_fn('resnet34', pretrained='imagenet')
 
+def pad(img):
+    x=img.shape[0]-img.shape[0]%32
+    y=img.shape[1]-img.shape[1]%32
+    img=img[:x,:y]
+    return img
 
 # define the training dataset
 class MandibleDataset(Dataset):
@@ -39,31 +43,22 @@ class MandibleDataset(Dataset):
         
         for filename in os.listdir(self.path_to_images):
             img = cv2.imread(os.path.join(self.path_to_images, filename), 0)
-            if args.model=='unet':
-                img=cv2.resize(img , ( int(img.shape[1]*args.scale),int(img.shape[0]*args.scale) ))
-            elif args.model=='SegFormer':
-                img=cv2.resize(img , (1024, 512))
-            else:
-                img=cv2.resize(img , (512, 512))
 
+            img=cv2.resize(img , (900,400))
+            img=pad(img)
             img-=img.min()
             img = img.astype(np.float32) / img.max()
             self.images.append(img)
         i=-1
         for filename in os.listdir(self.path_to_masks):
             i+=1
-            masks = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
-            if args.model=='unet':
-                masks=cv2.resize(masks , ( self.images[i].shape[1],self.images[i].shape[0] ))
-            elif args.model=='SegFormer':
-                masks=cv2.resize(masks , (256, 128))
-            else:     
-                masks=cv2.resize(masks , (512, 512))
-
-            masks-=masks.min()
-            masks = masks.astype(np.float32) / masks.max()
-            masks=np.where(masks==np.unique(masks)[0],0,1)
-            self.masks.append(masks)
+            mask = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
+            mask=cv2.resize(mask , (900,400))
+            mask=pad(mask)
+            mask-=mask.min()
+            mask = mask.astype(np.float32) / mask.max()
+            mask=np.where(mask==np.unique(mask)[0],0,1)
+            self.masks.append(mask)
 
 
     def __len__(self):
@@ -73,7 +68,6 @@ class MandibleDataset(Dataset):
         image = self.images[idx]
         mask = self.masks[idx]
         if self.transform is not None:
-
             image = self.transform(image).to(device).contiguous()
             mask = self.transform(mask).to(device).contiguous()
         return image, mask
@@ -99,11 +93,10 @@ def train(model, device, train_loader, optimizer, criterion):
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
-        loss+=Dice(output[:,1,:,:], target)
         train_loss += loss.item()
         loss.backward()
         optimizer.step()
-        total_dice += Dice(output[:,0,:,:], target).item()
+        total_dice +=Dice(output[:,0,:,:], target).item()
     train_loss /= len(train_loader)
     total_dice /= len(train_loader)
     return train_loss, total_dice
@@ -119,7 +112,6 @@ def validate(model, device, val_loader, criterion):
             target=target.squeeze(1).long()
             output = model(data)
             loss = criterion(output, target)
-            loss+=Dice(output[:,1,:,:], target)
             val_loss += loss.item()
             total_dice += Dice(output[:,0,:,:], target).item()
     val_loss /= len(val_loader)
@@ -157,7 +149,8 @@ def train_model(model,epochs,batch_size,learning_rate,device):
         transforms.ToTensor(),
     ])
 
-    criterion =  nn.CrossEntropyLoss() 
+    criterion = DiceLoss('multiclass')
+
     optimizer = optim.RMSprop(model.parameters(), lr=learning_rate)
 
     # define the training data loader
@@ -193,6 +186,7 @@ def train_model(model,epochs,batch_size,learning_rate,device):
         val_dice_list.append(val_dice)
         torch.save(model.state_dict(), 'checkpoints/{}_model_epoch{}.pth'.format(args.model,epoch+1))
         if val_loss<min_val_loss:
+            min_val_loss=val_loss
             torch.save(model.state_dict(), 'checkpoints/{}_model_best.pth'.format(args.model))
 
 
@@ -204,11 +198,33 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     if args.model=='unet':
-        model = UNet(n_channels=1, n_classes=2, bilinear=False)
-    if args.model=='SegFormer':
-        model=Segformer(channels=1,num_classes=2)
+
+        model = smp.Unet(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
     if args.model=='unet++':
-        model=NestedUNet(1,2)
+        print(1)
+        model = smp.UnetPlusPlus(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
+    if args.model=='FPN':
+        print(1)
+        model = smp.FPN(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
+
 
     model = model.to(memory_format=torch.channels_last)
     model.to(device=device)

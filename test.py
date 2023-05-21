@@ -8,15 +8,14 @@ import cv2
 import os
 from torchvision.transforms import transforms
 from tqdm import tqdm
-from models.unet import UNet
 from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
-from models.SegFormer import Segformer
-from models.unetplusplus.unetplusplus import NestedUNet
+from segmentation_models_pytorch.losses import DiceLoss
+import segmentation_models_pytorch as smp
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, SegFormer and unet++')
+parser.add_argument('--model', metavar='',type=str, default='unet', help='The architecture used, which can be unet, unet++ and FPN')
 parser.add_argument('--checkpoint', metavar='',type=str,default='checkpoints/unet_model_best.pth',help='path to model')
 parser.add_argument('--path_to_images',metavar='',type=str,default='dataset/test/Images',help='path to images')
 parser.add_argument('--path_to_masks',metavar='',type=str,default='dataset/test/Segmentation1',help='path to masks')
@@ -25,6 +24,12 @@ parser.add_argument('--scale',metavar='', type=float, default=0.3, help='Downsca
 
 args = parser.parse_args()
 
+
+def pad(img):
+    x=img.shape[0]-img.shape[0]%32
+    y=img.shape[1]-img.shape[1]%32
+    img=img[:x,:y]
+    return img
 
 
 # define the test dataset
@@ -43,12 +48,8 @@ class MandibleDataset(Dataset):
             self.main_images.append(img)
             self.sizes.append(img.shape)
 
-            if args.model=='unet':
-                img=cv2.resize(img , ( int(img.shape[1]*args.scale),int(img.shape[0]*args.scale) ))
-            elif args.model=='SegFormer':
-                img=cv2.resize(img , (1024, 512))
-            else:
-                img=cv2.resize(img , (512, 512))
+            img=cv2.resize(img , (900,400))
+            img=pad(img)
 
             img-=img.min()
             img = img.astype(np.float32) / img.max()            
@@ -59,18 +60,14 @@ class MandibleDataset(Dataset):
         for filename in os.listdir(self.path_to_masks):
             i+=1
 
-            masks = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
-            if args.model=='unet':
-                masks=cv2.resize(masks , ( self.images[i].shape[1],self.images[i].shape[0] ))
-            elif args.model=='SegFormer':
-                masks=cv2.resize(masks , (256, 128))
-            else:     
-                masks=cv2.resize(masks , (512, 512))
-            masks-=masks.min()
-            masks = masks.astype(np.float32) / masks.max()
-            masks=np.where(masks==np.unique(masks)[0],0,1)
-            self.masks.append(masks)
+            mask = cv2.imread(os.path.join(self.path_to_masks, filename), 0)
+            mask=cv2.resize(mask , (900,400))
+            mask=pad(mask)
 
+            mask-=mask.min()
+            mask = mask.astype(np.float32) / mask.max()
+            mask=np.where(mask==np.unique(mask)[0],0,1)
+            self.masks.append(mask)
 
     def __len__(self):
         return len(self.images)
@@ -117,10 +114,10 @@ def test(model, device, val_loader, criterion):
             print(path)
             cv2.imwrite(path,result)
             loss = criterion(output, target)
-            loss+=Dice(output[:,1,:,:], target)
             val_loss += loss.item()
-            total_dice += Dice(output[:,0,:,:], target).item()
-            print(Dice(output[:,0,:,:], target).item())
+            dice_score=Dice(output[:,0,:,:], target).item()
+            total_dice += dice_score
+            print(dice_score)
 
     val_loss /= len(val_loader)
     total_dice /= len(val_loader)
@@ -138,7 +135,8 @@ def test_model(model,device):
     dataset = MandibleDataset(args.path_to_images,args.path_to_masks, transform=transform)
     test_loader = DataLoader(dataset, shuffle=False, drop_last=True)
 
-    criterion =  nn.CrossEntropyLoss() 
+    criterion = DiceLoss('multiclass')
+
     test_loss, test_dice = test(model, device, test_loader, criterion)
     print('test loss: {}'.format(test_loss))
     print('dice score: {}'.format(test_dice))
@@ -147,19 +145,41 @@ def test_model(model,device):
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
+    
     if args.model=='unet':
-        model = UNet(n_channels=1, n_classes=2, bilinear=False)
-    if args.model=='SegFormer':
-        model=Segformer(channels=1,num_classes=2)
+
+        model = smp.Unet(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
     if args.model=='unet++':
-        model=NestedUNet(1,2)
+        print(1)
+        model = smp.UnetPlusPlus(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
+    if args.model=='FPN':
+        print(1)
+        model = smp.FPN(
+            encoder_name="resnet34",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=2,
+            activation='sigmoid'
+        )
+
     model = model.to(memory_format=torch.channels_last)
 
     state_dict = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(state_dict)
     model.to(device=device)
     
-
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
 

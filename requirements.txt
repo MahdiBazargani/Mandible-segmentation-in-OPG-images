@@ -5,3 +5,4 @@ opencv_python==4.7.0.72
 torch==1.13.1
 torchvision==0.14.1
 tqdm==4.64.1
+segmentation-models-pytorch==0.3.2
